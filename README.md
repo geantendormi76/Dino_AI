@@ -51,16 +51,24 @@ uv pip install -r requirements.in
 python training_pipelines/1_detection_pipeline/train_detector.py
 
 # 流水线 2: 训练图像分类模型
+
+# 合成数据
 python training_pipelines/2_classification_pipeline/1_generate_dataset.py
+
+# 训练分类器
 python training_pipelines/2_classification_pipeline/2_train_classifier.py
 
 # 流水线 3: 训练决策策略模型
-# 3a. 采集你自己的专家数据
+
+# 采集你自己的专家数据
 python training_pipelines/3_policy_pipeline/1_collect_data.py
-# 3b. 将采集的数据处理成IQL格式
+
+# 将采集的数据处理成IQL格式
 python training_pipelines/3_policy_pipeline/2_process_data.py
-# 3c. 训练并导出最终的ONNX决策模型
-python training_pipelines/3_policy_pipeline/3_train_and_export.py```
+
+# 训练并导出最终的ONNX决策模型
+python training_pipelines/3_policy_pipeline/3_train_and_export.py
+```
 
 **3. 运行AI**
 
