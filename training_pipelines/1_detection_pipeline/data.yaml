@@ -1,0 +1,11 @@
+# 训练和验证数据的路径
+# [核心修改] 路径已更新，以匹配新的 data/detection_data/ 目录结构
+# 路径相对于项目根目录 (dino_ai)
+train: ../../data/detection_data/images/
+val: ../../data/detection_data/images/
+
+# 类别数量
+nc: 3
+
+# 类别名称
+names: ['bird', 'cactus', 'dino']
