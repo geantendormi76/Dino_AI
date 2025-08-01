@@ -17,7 +17,7 @@ def main():
 
     # --- [核心修改] 使用绝对路径，确保路径的稳健性 ---
     # 定义所有输入文件的路径
-    base_model_path = project_root / "_inputs" / "base_models" / "yolov8n.pt"
+    base_model_path = project_root / "_inputs" / "base_models" / "yolo11n.pt"
     data_config_path = project_root / "training_pipelines" / "1_detection_pipeline" / "data.yaml"
     
     # 定义所有输出的根目录
