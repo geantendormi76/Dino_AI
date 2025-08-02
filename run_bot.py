@@ -1,4 +1,4 @@
-# run_bot.py (V15 - 决策链条诊断 & 最终稳定版)
+# run_bot.py (L3+ 决策Transformer 版本)
 import sys
 from pathlib import Path
 import cv2
@@ -6,200 +6,173 @@ import mss
 import time
 import numpy as np
 import onnxruntime as ort
+from collections import deque
 
+# 修正Python模块搜索路径
 project_root = Path(__file__).resolve().parent
 sys.path.insert(0, str(project_root))
 
-from src.perception.detector import AdvancedDetector
-from src.world_modeling.state import GameState
-from src.world_modeling.world_model import UKFWorldModel
+# --- 导入新的L3+核心模块 ---
+from src.perception.fuser import PerceptionFuser
+from src.world_modeling.state_representation import StateRepresentationBuilder
 from src.utils.screen_manager import ScreenManager
 from src.controls.agent import GameAgent
-from src.state_builder import build_state_vector
+from src.contracts import Action # 引入动作枚举
 
 def main():
-    print("🚀 启动 Dino AI (专家大脑 - 最终决战版)...")
+    print("🚀 启动 Dino AI (L3+ 决策Transformer 大脑)...")
 
-    detector = None
-    prev_time = time.time() 
-
+    # --- 1. 初始化核心模块 ---
     try:
-        detector = AdvancedDetector(
-            yolo_model_path="models/detection/dino_detector.onnx",
-            classifier_model_path="models/classification/dino_classifier.pth"
-        )
-        game_state = GameState()
-        world_model = UKFWorldModel()
+        fuser = PerceptionFuser()
+        state_builder = StateRepresentationBuilder()
         agent = GameAgent()
         screen_manager = ScreenManager(mss.mss())
     except Exception as e:
         print(f"❌ 错误：初始化核心模块失败: {e}")
         return
 
-    # --- PyTorch Profiler 启用 (诊断结束后请注释或移除) ---
-    # detector.enable_profiler(log_dir="runs/classifier_profiler_logs")
-    # ----------------------------------------------------
-
-    onnx_model_path = "models/policy/dino_policy.onnx"
-    print(f"🧠 正在加载专家大脑: {onnx_model_path}")
+    # --- 2. 加载新的决策Transformer ONNX模型 ---
+    onnx_model_path = "models/policy/dino_decision_transformer.onnx"
+    print(f"🧠 正在加载决策Transformer大脑: {onnx_model_path}")
     try:
-        session_options = ort.SessionOptions()
-        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        
-        trt_provider_options = {
-            "trt_fp16_enable": True,
-            "trt_cuda_graph_enable": False, # 暂时禁用 CUDA Graph，因为未实现 I/O Binding
-            "trt_engine_cache_enable": True,
-            "trt_engine_cache_path": str(project_root / "models" / "onnx_cache"),
-            "trt_max_workspace_size": 2147483648, # 2GB 显存工作区
-        }
-        
-        providers = [
-            ("TensorrtExecutionProvider", trt_provider_options),
-            "CUDAExecutionProvider",
-            "CPUExecutionProvider",
-        ]
-
-        ort_session = ort.InferenceSession(
-            onnx_model_path,
-            sess_options=session_options,
-            providers=providers
-        )
-        
-        (project_root / "models" / "onnx_cache").mkdir(parents=True, exist_ok=True)
-
-        print(f"✅ 专家大脑加载成功！使用设备: {ort_session.get_providers()}")
-        print("注意：第一次运行可能较慢，TensorRT正在构建优化引擎并缓存。")
-
+        # 这里的 provider 配置可以复用你之前成功的TensorRT配置
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        ort_session = ort.InferenceSession(onnx_model_path, providers=providers)
+        print(f"✅ 决策Transformer大脑加载成功！使用设备: {ort_session.get_providers()}")
     except Exception as e:
         print(f"❌ 错误：加载ONNX模型失败: {e}")
-        print("请检查ONNX Runtime GPU是否正确安装，以及TensorRT相关库是否可用。")
-        print("错误详情:", e)
-        if detector and hasattr(detector, 'disable_profiler') and callable(detector.disable_profiler):
-            detector.disable_profiler()
         return
-    
+
+    # --- 3. 初始化上下文序列 (AI的短期记忆) ---
+    # 这个长度必须与训练时使用的上下文长度(max_len)完全一致
+    CONTEXT_LEN = 20
+    state_deque = deque(maxlen=CONTEXT_LEN)
+    action_deque = deque(maxlen=CONTEXT_LEN)
+    rtg_deque = deque(maxlen=CONTEXT_LEN)
+    timestep_deque = deque(maxlen=CONTEXT_LEN)
+
+    # --- 4. 游戏与主循环设置 ---
     screen_manager.select_roi()
     if screen_manager.roi is None:
         print("🔴 未选择游戏区域，程序退出。")
-        if detector and hasattr(detector, 'disable_profiler') and callable(detector.disable_profiler):
-            detector.disable_profiler() 
         return
 
     print("3秒后机器人将开始运行...")
     time.sleep(3)
     
+    # 初始目标回报设为一个较高值，例如期望获得1000分
+    # 这个值会随着时间递减
+    target_return = 1000.0
+    start_time = time.time()
+    last_action = 0 # 初始动作为 "无操作"
+
     try:
         while True:
             frame_start_time = time.perf_counter()
 
-            current_time = time.time()
-            dt = current_time - prev_time
-            if dt == 0: dt = 1/60
-            prev_time = current_time 
-
-            capture_start = time.perf_counter()
-            img = screen_manager.capture()
-            capture_end = time.perf_counter()
-            if img is None: break
+            # --- a. 感知与状态表示 ---
+            full_frame = screen_manager.capture()
+            if full_frame is None: break
             
-            detection_start = time.perf_counter()
-            detections = detector.detect(img, yolo_class_names=['bird', 'cactus', 'dino'])
-            detection_end = time.perf_counter()
+            fused_info = fuser.fuse(full_frame)
+            state_repr = state_builder.build(fused_info)
             
-            game_state_update_start = time.perf_counter()
-            game_state.update(detections, dt)
-            game_state_update_end = time.perf_counter()
+            if state_repr is None:
+                # 游戏可能结束或未开始，跳过决策
+                cv2.imshow("Dino AI - L3+ Brain (Debug View)", full_frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'): break
+                continue
 
-            world_model_update_start = time.perf_counter()
-            closest_obs = min(game_state.obstacles, key=lambda o: o[0][0]) if game_state.obstacles else None
-            world_model.update(closest_obs, dt)
-            world_model_update_end = time.perf_counter()
+            # --- b. 更新上下文序列 ---
+            # 注意：我们用上一帧的动作来填充当前帧的动作输入
+            state_deque.append(state_repr)
+            action_deque.append(last_action)
+            rtg_deque.append(target_return)
+            timestep = int(time.time() - start_time)
+            timestep_deque.append(timestep)
             
-            state_build_start = time.perf_counter()
-            state_vector = build_state_vector(game_state, world_model)
-            state_build_end = time.perf_counter()
+            # 简单地让目标回报随时间衰减
+            target_return = max(0, target_return - 0.1)
 
-            # --- 诊断 GameState, WorldModel, StateVector 的内容 ---
-            print(f"DEBUG_DECISION: Dino Box: {game_state.dino_box}")
-            print(f"DEBUG_DECISION: Obstacles Count: {len(game_state.obstacles)} | Closest: {closest_obs}")
-            pos, speed = world_model.get_state()
-            print(f"DEBUG_DECISION: World Model State (Pos, Speed): ({pos:.2f}, {speed:.2f})" if pos is not None else "DEBUG_DECISION: World Model State: None")
-            print(f"DEBUG_DECISION: State Vector: {state_vector.round(3) if state_vector is not None else 'None'}")
+            # --- c. 准备模型输入 (填充与塑形) ---
+            # 如果记忆还未填满，用0进行左填充
+            pad_len = CONTEXT_LEN - len(state_deque)
             
-            action_index = 0
-            inference_start = time.perf_counter()
-            if state_vector is not None:
-                input_state_tensor = np.expand_dims(state_vector, axis=0).astype(np.float32)
+            input_grids = np.stack([s['arena_grid'] for s in state_deque])
+            input_grids = np.pad(input_grids, ((pad_len, 0), (0, 0), (0, 0), (0, 0)), 'constant')
 
-                input_name = ort_session.get_inputs()[0].name
-                output_name = ort_session.get_outputs()[0].name 
+            # (同样的方法处理其他输入)
+            # ... (此处省略了对 global_features, actions, rtgs, timesteps 的填充代码，请务必补全)
+            # ... 补全代码 Start
+            input_globals = np.stack([s['global_features'] for s in state_deque])
+            input_globals = np.pad(input_globals, ((pad_len, 0), (0, 0)), 'constant')
 
-                raw_action_result = [] 
-                try:
-                    raw_action_result = ort_session.run([output_name], {input_name: input_state_tensor})
-                except Exception as e:
-                    print(f"❌ ERROR: 决策模型 (dino_policy.onnx) ORT run 失败！详细错误: {e}")
-                    print(f"  输入数据形状: {input_state_tensor.shape}, 类型: {input_state_tensor.dtype}")
-                    raw_action_result = [] 
+            input_actions = np.array(list(action_deque), dtype=np.int64)
+            input_actions = np.pad(input_actions, ((pad_len, 0)), 'constant')
+            input_actions = np.eye(3)[input_actions] # 转为 One-Hot
 
-                if raw_action_result and len(raw_action_result) > 0:
-                    action_output_tensor = raw_action_result[0]
-                    if isinstance(action_output_tensor, np.ndarray) and action_output_tensor.size > 0:
-                        action_index = int(action_output_tensor.flatten()[0]) 
-                        if action_index not in [0, 1, 2]:
-                            print(f"⚠️ 警告：决策模型返回了超出范围的动作索引: {action_index}。默认执行 '无操作'。")
-                            action_index = 0
-                    else:
-                        print(f"⚠️ 警告：决策模型返回非 numpy 数组或空数组。原始结果: {raw_action_result}。默认执行 '无操作'。")
-                        action_index = 0
-                else:
-                    print(f"⚠️ 警告：决策模型未返回任何结果。原始结果: {raw_action_result}。默认执行 '无操作'。")
-                    action_index = 0
+            input_rtgs = np.array(list(rtg_deque), dtype=np.float32).reshape(-1, 1)
+            input_rtgs = np.pad(input_rtgs, ((pad_len, 0), (0, 0)), 'constant')
+            
+            input_timesteps = np.array(list(timestep_deque), dtype=np.int64).reshape(-1, 1)
+            input_timesteps = np.pad(input_timesteps, ((pad_len, 0), (0, 0)), 'constant')
+            # ... 补全代码 End
 
-            inference_end = time.perf_counter()
 
-            # --- 诊断决策动作和执行情况 ---
-            print(f"DEBUG_DECISION: Chosen Action Index: {action_index}")
+            # 添加批次维度
+            input_grids = np.expand_dims(input_grids, axis=0).astype(np.float32)
+            input_globals = np.expand_dims(input_globals, axis=0).astype(np.float32)
+            input_actions = np.expand_dims(input_actions, axis=0).astype(np.float32)
+            input_rtgs = np.expand_dims(input_rtgs, axis=0).astype(np.float32)
+            input_timesteps = np.expand_dims(input_timesteps, axis=0).astype(np.int64)
 
-            action_execute_start = time.perf_counter()
-            if action_index == 1:
+            # --- d. 模型推理 ---
+            input_dict = {
+                'arena_grids': input_grids,
+                'global_features': input_globals, # 训练脚本中可能未使用，但最好传入
+                'actions': input_actions,
+                'rtgs': input_rtgs,
+                'timesteps': input_timesteps
+            }
+            
+            # 注意：ONNX模型的输入名必须与导出时完全一致
+            # 我们需要检查并调整这里的 key
+            onnx_input_names = [inp.name for inp in ort_session.get_inputs()]
+            # 假设ONNX输入名为 'states_arena_grid', 'states_global_features', ...
+            # 这里需要根据你的ONNX模型进行调整
+            onnx_inputs = {
+                "arena_grids": input_grids,
+                # "states_global_features": input_globals,
+                "actions": input_actions,
+                "returns_to_go": input_rtgs,
+                "timesteps": input_timesteps
+            }
+
+            action_logits = ort_session.run(None, onnx_inputs)[0]
+            
+            # 我们只关心序列中最后一个时间步的动作预测
+            action_index = np.argmax(action_logits[0, -1, :])
+
+            # --- e. 执行动作 ---
+            if action_index == Action.JUMP.value:
                 agent.jump(duration=0.05)
-            elif action_index == 2:
+            elif action_index == Action.DUCK.value:
                 agent.duck()
-            action_execute_end = time.perf_counter()
-
-            frame_end_time = time.perf_counter()
             
-            print(f"Frame Time: {((frame_end_time - frame_start_time)*1000):.2f}ms | "
-                  f"Capture: {((capture_end - capture_start)*1000):.2f}ms | "
-                  f"Detect: {((detection_end - detection_start)*1000):.2f}ms | "
-                  f"GameState: {((game_state_update_end - game_state_update_start)*1000):.2f}ms | "
-                  f"WorldModel: {((world_model_update_end - world_model_update_start)*1000):.2f}ms | "
-                  f"StateBuild: {((state_build_end - state_build_start)*1000):.2f}ms | "
-                  f"Inference: {((inference_end - inference_start)*1000):.2f}ms | "
-                  f"ActionExecute: {((action_execute_end - action_execute_start)*1000):.2f}ms")
+            # 更新 last_action 用于下一轮循环
+            last_action = action_index
 
-            debug_img = img.copy()
-            for box, class_name in detections:
-                x1, y1, x2, y2 = box
-                color_map = {"dino": (0, 255, 0), "cactus": (0, 0, 255), "bird": (255, 0, 0)}
-                color = next((c for k, c in color_map.items() if k in class_name), (0, 255, 255))
-                cv2.rectangle(debug_img, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(debug_img, class_name, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-            _, speed = world_model.get_state()
-            speed_text = f"Speed: {speed or 0:.0f}"
-            cv2.putText(debug_img, speed_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
-            cv2.imshow("Dino AI - Expert Brain (Debug View)", debug_img)
+            # --- f. 可视化与退出 ---
+            frame_end_time = time.perf_counter()
+            print(f"Frame Time: {((frame_end_time - frame_start_time)*1000):.2f}ms | Action: {Action(action_index).name}")
 
+            cv2.imshow("Dino AI - L3+ Brain (Debug View)", full_frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
     finally:
-        if detector and hasattr(detector, 'disable_profiler') and callable(detector.disable_profiler):
-            detector.disable_profiler() 
-            
-    cv2.destroyAllWindows()
-    print("🤖 Dino AI 已停止运行。")
-    
+        cv2.destroyAllWindows()
+        print("🤖 Dino AI (L3+) 已停止运行。")
+
 if __name__ == "__main__":
     main()

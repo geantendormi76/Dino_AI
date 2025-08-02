@@ -8,6 +8,7 @@ from PIL import Image
 from torch.profiler import profile, schedule, tensorboard_trace_handler
 import onnxruntime as ort 
 from pathlib import Path 
+from ultralytics import YOLO
 
 # --- 导入 Ultralytics 官方辅助函数 ---
 from ultralytics.utils.ops import non_max_suppression, scale_boxes

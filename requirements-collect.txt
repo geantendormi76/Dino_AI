@@ -1,0 +1,25 @@
+# dinoC 环境 (数据采集) 的最终、完整依赖蓝图
+# 语法修正：--extra-index-url 必须在文件顶部单独声明
+
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/
+
+# 1. PaddlePaddle 核心 (黄金组合)
+paddlepaddle-gpu==3.0.0
+paddleocr==3.0.0
+
+# 2. PyTorch 核心 (分类器所需)
+torch
+torchvision
+
+# 3. ONNX Runtime 核心 (YOLO检测器所需)
+onnxruntime-gpu
+
+# 4. YOLOv8 核心
+ultralytics
+
+# 5. 屏幕交互与工具库 (脚本直接依赖)
+mss
+pynput
+opencv-python
+numpy
+tqdm
