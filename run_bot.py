@@ -143,9 +143,9 @@ def main():
             # 这里需要根据你的ONNX模型进行调整
             onnx_inputs = {
                 "arena_grids": input_grids,
-                # "states_global_features": input_globals,
+                "global_features": input_globals, # <-- [已修正] 启用全局特征
                 "actions": input_actions,
-                "returns_to_go": input_rtgs,
+                "rtgs": input_rtgs, # <-- [已修正] 键名必须为 'rtgs'
                 "timesteps": input_timesteps
             }
 

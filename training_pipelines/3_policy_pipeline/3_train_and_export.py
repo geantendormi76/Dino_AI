@@ -44,8 +44,8 @@ def main():
     # 1. 模型配置
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     config = {
-        'state_channels': 2, # 来自 StateRepresentationBuilder
-        'action_dim': 1,     # 动作是一个单一的整数 (0, 1, 2)
+        'state_channels': 4, # 来自 StateRepresentationBuilder
+        'action_dim': 3,     # 动作是一个单一的整数 (0, 1, 2)
         'num_actions': 3,    # 动作空间的类别数
         'hidden_size': 128,
         'n_layer': 3,
@@ -112,21 +112,27 @@ def main():
     
     # 导出ONNX需要一个假的输入
     dummy_states = {
-        'arena_grid': torch.randn(1, config['max_len'], 2, 25, 80).to(device),
+        'arena_grid': torch.randn(1, config['max_len'], 4, 25, 80).to(device), # [已修正] 通道数从 2 改为 4
         'global_features': torch.randn(1, config['max_len'], 1).to(device)
     }
-    dummy_actions = torch.zeros(1, config['max_len'], config['action_dim']).to(device)
+    # [已修正] 这里的dummy_actions也需要和模型内部处理逻辑一致，模型期望的是one-hot编码
+    dummy_actions = torch.zeros(1, config['max_len'], config['num_actions']).to(device) 
     dummy_rtgs = torch.randn(1, config['max_len'], 1).to(device)
     dummy_timesteps = torch.zeros(1, config['max_len'], 1, dtype=torch.long).to(device)
+
+    # [重要修正] run_bot.py中的ONNX输入名与这里不一致，我们需要统一它们
+    # run_bot.py 使用 "returns_to_go"，而这里是 "rtgs"。我们统一为ONNX导出的名字。
+    input_names = ['arena_grids', 'global_features', 'actions', 'returns_to_go', 'timesteps']
     
     torch.onnx.export(
         model,
-        (dummy_states, dummy_actions, dummy_rtgs, dummy_timesteps),
+        # 传递的元组参数顺序必须和input_names严格对应
+        (dummy_states['arena_grid'], dummy_states['global_features'], dummy_actions, dummy_rtgs, dummy_timesteps),
         str(ONNX_MODEL_PATH),
         export_params=True,
         opset_version=12,
         do_constant_folding=True,
-        input_names=['arena_grids', 'global_features', 'actions', 'rtgs', 'timesteps'],
+        input_names=input_names, # 使用修正后的输入名列表
         output_names=['output_actions'],
     )
     print("\n" + "="*50)

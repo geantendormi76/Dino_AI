@@ -23,24 +23,24 @@ class PerceptionFuser:
         print("✅ 感知融合器 (PerceptionFuser) 初始化完成。")
 
     def fuse(self, full_frame: np.ndarray) -> dict:
-        """
-        对完整的游戏帧进行感知融合。
+        # [诊断性修改] 根据报告建议，将阈值降至极低水平以捕获任何可能的信号
+        confidence_threshold = 0.01  # 保持这个极低的阈值用于诊断
+        
+        detections = self.detector.detect(
+            full_frame, 
+            yolo_class_names=['bird', 'cactus', 'dino'],
+            confidence_threshold=confidence_threshold
+        )
+        
+        # [诊断日志] 确认从检测器收到的检测数量
+        print(f"[Fuser DEBUG] 从检测器收到 {len(detections) if detections is not None else 0} 个检测结果。")
 
-        Args:
-            full_frame (np.ndarray): 完整的游戏窗口截图 (BGR格式)。
-
-        Returns:
-            dict: 包含当前帧所有语义信息的结构化字典。
-        """
-        # 1. 目标检测
-        detections = self.detector.detect(full_frame, yolo_class_names=['bird', 'cactus', 'dino'])
-
-        # 2. OCR识别分数
+        # 2. OCR识别分数 (逻辑不变)
         x1, y1, x2, y2 = self.SCORE_ROI
         score_image = full_frame[y1:y2, x1:x2]
         game_score = self.ocr_handler.recognize_score(score_image)
 
-        # 3. 结果融合
+        # 3. 结果融合 (逻辑不变)
         fused_info = {
             "dino_box": None,
             "obstacles": [],
@@ -57,3 +57,9 @@ class PerceptionFuser:
                 })
         
         return fused_info
+    
+    def reset(self):
+        """重置内部所有有状态的模块，如追踪器"""
+        if hasattr(self.detector, 'tracker'):
+            self.detector.tracker.reset()
+        print("PerceptionFuser已重置。")

@@ -1,23 +1,29 @@
 # dinoC 环境 (数据采集) 的最终、完整依赖蓝图
-# 语法修正：--extra-index-url 必须在文件顶部单独声明
+# 语法：--extra-index-url 必须在文件顶部单独声明
 
---extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/
+# 1. PyTorch 官方源 (用于安装CUDA版本的torch)
+--index-url https://download.pytorch.org/whl/cu118
 
-# 1. PaddlePaddle 核心 (黄金组合)
-paddlepaddle-gpu==3.0.0
-paddleocr==3.0.0
+# 2. PaddlePaddle 官方源 (用于安装paddleocr)
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118
 
-# 2. PyTorch 核心 (分类器所需)
+# 3. PyTorch 核心 (分类器所需)
+#    安装时会自动使用上面的 --index-url
 torch
 torchvision
 
-# 3. ONNX Runtime 核心 (YOLO检测器所需)
+# 4. PaddlePaddle 核心 (OCR所需)
+#    安装时会自动使用上面的 --extra-index-url
+paddlepaddle-gpu==3.0.0
+paddleocr==3.0.0
+
+# 5. ONNX Runtime 核心 (YOLO检测器所需)
 onnxruntime-gpu
 
-# 4. YOLOv8 核心
+# 6. YOLOv8 核心
 ultralytics
 
-# 5. 屏幕交互与工具库 (脚本直接依赖)
+# 7. 屏幕交互与工具库 (脚本直接依赖)
 mss
 pynput
 opencv-python
